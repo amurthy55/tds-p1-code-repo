@@ -99,11 +99,9 @@ def enable_github_pages(repo_name: str):
 def write_code_with_llm(data, previous_files=None):
     """
     Generates or updates files using AI Pipe LLM API.
-
     - data: dict containing 'brief', 'attachments', 'checks', etc.
     - previous_files: list of dicts [{'file_name': ..., 'content': ...}] from round1,
                       used in round2 to update existing files.
-
     Returns a list of file dicts: [{'file_name': ..., 'content': ...}, ...]
     """
 
@@ -115,8 +113,23 @@ def write_code_with_llm(data, previous_files=None):
     attachments = data.get("attachments", [])
     checks = data.get("checks", [])
 
-    # Summarize attachments
-    attachment_summary = "\n".join([f"- {a['name']}: {a.get('url','')[:100]}..." for a in attachments])
+    # --- Summarize attachments safely ---
+    if attachments:
+        attachment_summary_lines = []
+        for a in attachments:
+            name = a.get("name", "unnamed")
+            url = a.get("url", "")
+            if isinstance(url, str) and url.startswith("data:image/"):
+                kind = "Image (base64)"
+            elif isinstance(url, str) and url.startswith("http"):
+                kind = "URL"
+            else:
+                kind = "Unknown"
+            short_url = (url[:100] + "...") if isinstance(url, str) and len(url) > 100 else url
+            attachment_summary_lines.append(f"- {name} [{kind}]: {short_url or '(no URL)'}")
+        attachment_summary = "\n".join(attachment_summary_lines)
+    else:
+        attachment_summary = ""
 
     # Summarize previous files for round2 context
     prev_files_summary = ""
@@ -141,17 +154,15 @@ def write_code_with_llm(data, previous_files=None):
         prompt = f"""
 You are an expert software engineer. You have the following existing files:
 {prev_files_summary}
-
 Task Brief:
 {brief}
-
 Checks / Evaluation Criteria:
 {checks_summary}
-
+ATTACHMENTS:
+{attachment_summary}
 Update or modify the existing files to satisfy the brief and checks.
 Preserve existing logic unless changes are required.
 Always generate a README.md with summary, setup, usage, code explanation, license and description of the app
-
 Provide ONLY JSON like this:
 {{
   "files": [
@@ -164,22 +175,16 @@ Provide ONLY JSON like this:
         prompt = f"""
 You are an expert software engineer.
 Based on the following task brief, generate a minimal runnable app that fulfills the description.
-
 Requirements:
 - Generate at least one runnable app file (e.g., main.py, index.html)
 - Always generate a README.md with summary, setup, usage, code explanation, license and description of the app
 - Provide ONLY JSON with 'files' array, each element having 'file_name' and 'content'
-
-
 --- TASK BRIEF ---
 {brief}
-
 --- ATTACHMENTS ---
 {attachment_summary}
-
 Checks / Evaluation Criteria:
 {checks_summary}
-
 Requirements:
 - Generate only valid UTF-8 text.
 - Provide ONLY JSON like this:
@@ -231,7 +236,7 @@ Requirements:
                 f["content"] = inner_json["files"][0]["content"]
             except Exception:
                 pass
-    print(files)
+    # print(files)
 
     return files
 
@@ -316,7 +321,7 @@ def round2(data):
     url = f"https://api.github.com/repos/{GITHUB_USER}/{repo_name}/contents/"
     headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
     resp = requests.get(url, headers=headers)
-    print(f"Round 2 Response is : {resp.text}")
+    # print(f"Round 2 Response is : {resp.text}")
     if resp.status_code == 200:
         for item in resp.json():
             if item["type"] == "file":
@@ -344,7 +349,11 @@ def round2(data):
     post_evaluation_result(data, repo_name)
 
 
-   
+#health check added
+@app.get("/health")
+async def health():
+    """Explicit health check endpoint"""
+    return {"status": "healthy"}
 
 
 #post end point that takes json input with following fields : email, secret, task, round, nounce, brief, checks, evaluation_url,attachments
