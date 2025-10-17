@@ -287,10 +287,7 @@ async def handle_task(request: Request,background_tasks: BackgroundTasks):
         )
 
     # Immediate response (200 OK)
-    return JSONResponse(
-        status_code=200,
-        content={"status": "success", "message": message}
-    )
+   return JSONResponse(status_code=200, content={"usercode": "..."})
         
 
 if __name__ == "__main__":
