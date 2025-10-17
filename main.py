@@ -49,6 +49,43 @@ def get_sha_of_latest_commit(repo_name: str, branch_name) -> str:
         raise Exception("GitHub get latest commit SHA failed")
  
 
+# def push_files_to_repo(repo_name: str, files: list[dict]):
+#     headers = {
+#         "Authorization": f"token {GITHUB_TOKEN}",
+#         "Accept": "application/vnd.github.v3+json"
+#     }
+
+#     for f in files:
+#         file_name = f["file_name"]
+#         content_b64 = base64.b64encode(f["content"].encode()).decode()
+
+#         # ✅ Check if the file already exists
+#         get_url = f"https://api.github.com/repos/amurthy55/{repo_name}/contents/{file_name}"
+#         get_resp = requests.get(get_url, headers=headers)
+
+#         sha = None
+#         if get_resp.status_code == 200:
+#             sha = get_resp.json().get("sha")
+
+#         data = {
+#             "message": f"Add or update {file_name}",
+#             "content": content_b64,
+#         }
+#         if sha:
+#             data["sha"] = sha  # Required for updating existing file
+
+#         put_url = f"https://api.github.com/repos/amurthy55/{repo_name}/contents/{file_name}"
+#         put_resp = requests.put(put_url, headers=headers, json=data)
+
+#         if put_resp.status_code not in [200, 201]:
+#             print(f"⚠️ Failed to push file {file_name}: {put_resp.json()}")
+#             raise Exception("GitHub push file failed")
+
+#     print(f"✅ All files pushed to {repo_name}")
+
+
+
+
 def push_files_to_repo(repo_name, files, branch="main", retries=5, delay=2):
     """
     Push multiple files to GitHub repo. Handles new files and updates.
@@ -96,12 +133,102 @@ def enable_github_pages(repo_name: str):
     if response.status_code == 201:
         print(f"GitHub Pages enabled for repository {repo_name}.")
     
+
+# def write_code_with_llm(data):
+#     """
+#     Uses AI Pipe LLM API to generate minimal app code and README.md
+#     based on the given 'brief' and 'attachments' in data.
+#     Returns a list of file dicts [{file_name, content}, ...].
+#     """
+
+#     api_key = os.getenv("AIPIPE_API_KEY")
+#     if not api_key:
+#         raise Exception("Missing AIPIPE_API_KEY")
+
+#     brief = data.get("brief", "")
+#     attachments = data.get("attachments", [])
+
+#     attachment_summary = ""
+#     if attachments:
+#         for att in attachments:
+#             attachment_summary += f"- {att['name']}: {att.get('url','')[:100]}...\n"
+
+#     prompt = f"""
+#     You are an expert software engineer.
+#     Based on the following task brief, generate a minimal runnable web app that fulfills the description.
+#     --- TASK BRIEF ---
+#     {brief}
+#     --- ATTACHMENTS ---
+#     {attachment_summary}
+#     Requirements:
+#     - Generate only valid UTF-8 text.
+#     - Provide *only* JSON like this:
+#       {{
+#         "files": [
+#           {{"file_name": "main.py", "content": "<code>"}},
+#           {{"file_name": "README.md", "content": "<markdown>"}}
+#         ]
+#       }}
+#     - Do not include any extra explanation or formatting outside the JSON.
+#     """
+
+#     headers = {
+#         "Authorization": f"Bearer {api_key}",
+#         "Content-Type": "application/json"
+#     }
+
+#     payload = {
+#         "model": "gpt-4o-mini",
+#         "messages": [
+#             {"role": "system", "content": "You are an expert code generator. Respond ONLY with valid JSON."},
+#             {"role": "user", "content": prompt}
+#         ],
+#         "temperature": 0.3
+#     }
+
+#     url = "https://aipipe.org/openrouter/v1/chat/completions"
+#     response = requests.post(url, headers=headers, json=payload)
+
+#     if response.status_code != 200:
+#         print("AI Pipe error:", response.text)
+#         raise Exception("AI Pipe LLM call failed")
+
+#     result = response.json()
+#     content = result["choices"][0]["message"]["content"].strip()
+
+#     # 🔍 Parse nested JSON cleanly
+#     try:
+#         parsed = json.loads(content)
+#         files = parsed.get("files", [])
+#     except Exception:
+#         # Some models double-encode JSON, e.g. as a string within another JSON
+#         try:
+#             inner = json.loads(json.loads(content))
+#             files = inner.get("files", [])
+#         except Exception as e:
+#             print("⚠️ Could not parse LLM response, fallback to single file:", e)
+#             files = [{"file_name": "main.py", "content": content}]
+
+#     # 🚫 Strip accidental JSON wrapping (case you saw)
+#     for f in files:
+#         c = f["content"].strip()
+#         if c.startswith("{") and '"files"' in c:
+#             try:
+#                 inner_json = json.loads(c)
+#                 f["content"] = inner_json["files"][0]["content"]
+#             except Exception:
+#                 pass
+
+#     return files
+
 def write_code_with_llm(data, previous_files=None):
     """
     Generates or updates files using AI Pipe LLM API.
+
     - data: dict containing 'brief', 'attachments', 'checks', etc.
     - previous_files: list of dicts [{'file_name': ..., 'content': ...}] from round1,
                       used in round2 to update existing files.
+
     Returns a list of file dicts: [{'file_name': ..., 'content': ...}, ...]
     """
 
@@ -113,23 +240,53 @@ def write_code_with_llm(data, previous_files=None):
     attachments = data.get("attachments", [])
     checks = data.get("checks", [])
 
-    # --- Summarize attachments safely ---
+       # --- Summarize attachments safely ---
+    attachment_summary = ""
     if attachments:
-        attachment_summary_lines = []
-        for a in attachments:
-            name = a.get("name", "unnamed")
-            url = a.get("url", "")
-            if isinstance(url, str) and url.startswith("data:image/"):
-                kind = "Image (base64)"
-            elif isinstance(url, str) and url.startswith("http"):
-                kind = "URL"
-            else:
-                kind = "Unknown"
-            short_url = (url[:100] + "...") if isinstance(url, str) and len(url) > 100 else url
-            attachment_summary_lines.append(f"- {name} [{kind}]: {short_url or '(no URL)'}")
-        attachment_summary = "\n".join(attachment_summary_lines)
+      summary_lines = []
+      for a in attachments:
+          name = a.get("name", "unnamed")
+          url = a.get("url", "")
+          kind = "Unknown"
+          snippet = ""
+
+          if not isinstance(url, str):
+              summary_lines.append(f"- {name} [Invalid URL format]")
+              continue
+
+          # Detect attachment kind
+          if url.startswith("data:application/json;base64,"):
+              kind = "JSON"
+          elif url.startswith("data:text/csv;base64,"):
+              kind = "CSV"
+          elif url.startswith("data:text/markdown;base64,"):
+              kind = "Markdown"
+          elif url.startswith("data:text/plain;base64,"):
+              kind = "Text"
+          elif url.startswith("data:image/"):
+              kind = "Image (base64)"
+          elif url.startswith("http"):
+              kind = "URL"
+
+          # Attempt to decode text-like base64 data
+          if "base64," in url and kind in ["JSON", "CSV", "Markdown", "Text"]:
+              try:
+                  b64data = url.split("base64,", 1)[1]
+                  decoded = base64.b64decode(b64data).decode("utf-8", errors="ignore")
+                  short_content = decoded[:800].replace("\n", "\\n")
+                  snippet = f"[{kind} content snippet]: {short_content}..."
+              except Exception as e:
+                  snippet = f"[{kind} decoding failed: {e}]"
+          else:
+              # For images or non-decodable data
+              short_url = (url[:100] + "...") if len(url) > 100 else url
+              snippet = f"[{kind}]: {short_url}"
+
+          summary_lines.append(f"- {name} {snippet}")
+
+      attachment_summary = "\n".join(summary_lines)
     else:
-        attachment_summary = ""
+          attachment_summary = "(No attachments provided)"
 
     # Summarize previous files for round2 context
     prev_files_summary = ""
@@ -154,15 +311,20 @@ def write_code_with_llm(data, previous_files=None):
         prompt = f"""
 You are an expert software engineer. You have the following existing files:
 {prev_files_summary}
+
 Task Brief:
 {brief}
+
 Checks / Evaluation Criteria:
 {checks_summary}
-ATTACHMENTS:
+
+--- ATTACHMENTS ---
 {attachment_summary}
+
 Update or modify the existing files to satisfy the brief and checks.
 Preserve existing logic unless changes are required.
 Always generate a README.md with summary, setup, usage, code explanation, license and description of the app
+
 Provide ONLY JSON like this:
 {{
   "files": [
@@ -175,16 +337,22 @@ Provide ONLY JSON like this:
         prompt = f"""
 You are an expert software engineer.
 Based on the following task brief, generate a minimal runnable app that fulfills the description.
+
 Requirements:
 - Generate at least one runnable app file (e.g., main.py, index.html)
 - Always generate a README.md with summary, setup, usage, code explanation, license and description of the app
 - Provide ONLY JSON with 'files' array, each element having 'file_name' and 'content'
+
+
 --- TASK BRIEF ---
 {brief}
+
 --- ATTACHMENTS ---
 {attachment_summary}
+
 Checks / Evaluation Criteria:
 {checks_summary}
+
 Requirements:
 - Generate only valid UTF-8 text.
 - Provide ONLY JSON like this:
@@ -236,7 +404,7 @@ Requirements:
                 f["content"] = inner_json["files"][0]["content"]
             except Exception:
                 pass
-    # print(files)
+    print(files)
 
     return files
 
@@ -311,6 +479,24 @@ def round1(data):
     # 5. Notify evaluation_url with retries
     post_evaluation_result(data, new_repo_name)
    
+
+# def round2(data):
+#     print("Executing Round 2 tasks...")
+
+#     repo_name = f'{data["task"]}_{data["nonce"]}'
+
+#     # 1. Generate updated code/README based on new brief
+#     files = write_code_with_llm(data)
+
+#     # 2. Push updated files (handles existing files automatically)
+#     push_files_to_repo(repo_name, files)
+
+#     # 3. Optionally ensure Pages still enabled
+#     # enable_github_pages(repo_name)
+
+#     # 4. Notify evaluation URL with round=2
+#     post_evaluation_result(data, repo_name)
+
 def round2(data):
     print("Executing Round 2 tasks...")
 
@@ -321,7 +507,7 @@ def round2(data):
     url = f"https://api.github.com/repos/{GITHUB_USER}/{repo_name}/contents/"
     headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
     resp = requests.get(url, headers=headers)
-    # print(f"Round 2 Response is : {resp.text}")
+    print(f"Round 2 Response is : {resp.text}")
     if resp.status_code == 200:
         for item in resp.json():
             if item["type"] == "file":
@@ -349,11 +535,7 @@ def round2(data):
     post_evaluation_result(data, repo_name)
 
 
-#health check added
-@app.get("/health")
-async def health():
-    """Explicit health check endpoint"""
-    return {"status": "healthy"}
+   
 
 
 #post end point that takes json input with following fields : email, secret, task, round, nounce, brief, checks, evaluation_url,attachments
