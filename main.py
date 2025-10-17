@@ -47,37 +47,6 @@ def get_sha_of_latest_commit(repo_name: str, branch_name) -> str:
     else:
         print(f"Failed to get latest commit SHA for branch {branch_name} in repository {repo_name}. Response: {response.json()}")
         raise Exception("GitHub get latest commit SHA failed")
-    
-# def push_files_to_repo(repo_name: str, files: list[dict], round: int = 1):
-#     # takes repo_name and json array of files(with fields file_name and content ) as input and pushes the files to the repo using github api 
-#     if(round == 2):
-#         latest_sha = get_sha_of_latest_commit(repo_name, "main")
-#     else:
-#         latest_sha = None
-
-#     headers = { "Authorization": f"Bearer {GITHUB_TOKEN}" }
-#     for file in files:    
-#         file_name = file['file_name']
-#         file_content = file['content']
-
-#         if isinstance(file_content, bytes):
-#             file_content = base64.b64encode(file_content).decode('utf-8')
-        
-#         else:
-#             file_content = base64.b64encode(file_content.encode('utf-8')).decode('utf-8')
-#         payload = { "message": f"Add {file_name}",
-#                     "content": file_content,
-#                     "branch": "main"
-#                   }
-#         if latest_sha:
-#             payload["sha"] = latest_sha
-
-#         response = requests.put(f"https://api.github.com/repos/amurthy55/{repo_name}/contents/{file_name}", headers=headers, json=payload)
-#         if response.status_code == 201:
-#             print(f"File {file['file_name']} pushed to repository {repo_name}.")
-#         else:
-#             print(f"Failed to push file {file['file_name']} to repository {repo_name}. Response: {response.json()}")
-#             raise Exception("GitHub push file failed")
 
 def push_files_to_repo(repo_name: str, files: list[dict]):
     headers = {
